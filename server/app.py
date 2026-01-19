@@ -1,43 +1,69 @@
 #!/usr/bin/env python3
 
-from flask import request, session
-from flask_restful import Resource
-
-from config import app, db, api
+from flask import Flask, jsonify, request, session
+from flask_migrate import Migrate
+from config import db
 from models import User
 
-class ClearSession(Resource):
+app = Flask(__name__)
+app.secret_key = b'Y\xf1Xz\x00\xad|eQ\x80t \xca\x1a\x10K'
 
-    def delete(self):
-    
-        session['page_views'] = None
-        session['user_id'] = None
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-        return {}, 204
+db.init_app(app)
+migrate = Migrate(app, db)
 
-class Signup(Resource):
-    
-    def post(self):
-        json = request.get_json()
-        user = User(
-            username=json['username']
-        )
-        user.password_hash = json['password']
-        db.session.add(user)
-        db.session.commit()
-        return user.to_dict(), 201
+# -------------------------
+# Routes
+# -------------------------
 
-class CheckSession(Resource):
-    pass
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
 
-class Login(Resource):
-    pass
+    user = User(username=username)
+    user.set_password(password)
 
-class Logout(Resource):
-    pass
+    db.session.add(user)
+    db.session.commit()
 
-api.add_resource(ClearSession, '/clear', endpoint='clear')
-api.add_resource(Signup, '/signup', endpoint='signup')
+    session['user_id'] = user.id
 
-if __name__ == '__main__':
+    return jsonify(user.to_dict()), 201
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+
+    user = User.query.filter_by(username=username).first()
+
+    if user and user.authenticate(password):
+        session['user_id'] = user.id
+        return jsonify(user.to_dict()), 200
+
+    return jsonify({}), 401
+
+
+@app.route("/logout", methods=["DELETE"])
+def logout():
+    session.pop('user_id', None)
+    return jsonify({}), 204
+
+
+@app.route("/check_session", methods=["GET"])
+def check_session():
+    user_id = session.get('user_id')
+    if user_id:
+        user = User.query.get(user_id)
+        return jsonify(user.to_dict()), 200
+    return jsonify({}), 204
+
+
+if __name__ == "__main__":
     app.run(port=5555, debug=True)
